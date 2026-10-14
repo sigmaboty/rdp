@@ -35,7 +35,8 @@ jobs:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
           # Default password is quan2111 (used when the RDP_PASSWORD secret is not set)
-          $password = if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) { "quan2111" } else { $env:RDP_PASSWORD }
+          $password = $env:RDP_PASSWORD
+          if (-not $password) { $password = "quan2111" }
 
           # The Windows runner image enforces the local password policy (complexity
           # requirements + minimum length), which makes New-LocalUser reject a simple
@@ -124,7 +125,8 @@ jobs:
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
-          $password = if (string::IsNullOrWhiteSpace($env:RDP_PASSWORD)) { "quan2111" } else { $env:RDP_PASSWORD }
+          $password = $env:RDP_PASSWORD
+          if (-not $password) { $password = "quan2111" }
 
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
