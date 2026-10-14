@@ -36,12 +36,35 @@ jobs:
         run: |
           # Default password is quan2111 (used when the RDP_PASSWORD secret is not set)
           $password = if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) { "quan2111" } else { $env:RDP_PASSWORD }
+
+          # The Windows runner image enforces the local password policy (complexity
+          # requirements + minimum length), which makes New-LocalUser reject a simple
+          # fixed password with InvalidPasswordException. Disable both first.
+          $cfg = "$env:TEMP\secpol.inf"
+          $db  = "$env:TEMP\secpol.sdb"
+          secedit /export /cfg $cfg | Out-Null
+          $policy = Get-Content $cfg
+          $policy = $policy -replace 'PasswordComplexity\s*=\s*\d+', 'PasswordComplexity = 0'
+          $policy = $policy -replace 'MinimumPasswordLength\s*=\s*\d+', 'MinimumPasswordLength = 0'
+          $policy | Set-Content -Path $cfg -Encoding Unicode
+          secedit /configure /db $db /cfg $cfg /areas SECURITYPOLICY | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+              Write-Warning "secedit exited with code $LASTEXITCODE - password policy may still be enforced."
+          }
+
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
-          if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
-              Set-LocalUser -Name "RDP" -Password $securePass
-          } else {
-              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          try {
+              if (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue) {
+                  Set-LocalUser -Name "RDP" -Password $securePass
+              } else {
+                  New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+              }
+          } catch {
+              Write-Error "Could not set the password for user 'RDP': $($_.Exception.Message)"
+              Write-Host "Hint: set the repo secret RDP_PASSWORD to a value that satisfies the"
+              Write-Host "policy, e.g. Quan2111! (upper + lower + digit + symbol), then re-run."
+              exit 1
           }
 
           Add-LocalGroupMember -Group "Administrators" -Member "RDP" -ErrorAction SilentlyContinue
@@ -51,6 +74,8 @@ jobs:
               Write-Error "User creation failed"
               exit 1
           }
+
+          Write-Host "Password policy: PasswordComplexity=0, MinimumPasswordLength=0"
 
           Write-Host "RDP user 'RDP' is ready."
 
@@ -99,7 +124,7 @@ jobs:
         env:
           RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
-          $password = if ([string]::IsNullOrWhiteSpace($env:RDP_PASSWORD)) { "quan2111" } else { $env:RDP_PASSWORD }
+          $password = if (string::IsNullOrWhiteSpace($env:RDP_PASSWORD)) { "quan2111" } else { $env:RDP_PASSWORD }
 
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
@@ -109,6 +134,6 @@ jobs:
 
           # Keep runner active indefinitely (or until manually cancelled)
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+              Write-Host "$(Get-Date) RDP Active - Use Ctrl+C in workflow to terminate"
               Start-Sleep -Seconds 300
           }
